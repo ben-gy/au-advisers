@@ -105,7 +105,11 @@ function build(
     key += `|#${l.num}`;
     const leaf: IcicleNode = {
       key, label: l.name, value, depth: path.length + 1, children: [],
-      owner: l.owner, ref: licensees.indexOf(l),
+      // ownerLive, not owner. Nine licensees with 1,512 current advisers sit
+      // under a bank chain ASIC records as CEASED; colouring their leaves in
+      // the bank's colour contradicted the site's own dated rule and the other
+      // four views, and repainted the retreat as if it had not happened.
+      owner: l.ownerLive ? l.owner : null, ref: licensees.indexOf(l),
     };
     index.set(key, leaf);
     parent.children.push(leaf);

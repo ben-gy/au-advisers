@@ -153,8 +153,19 @@ describe.each(VIEWS)('view: %s', (name) => {
 
   it('gives every chart an accessible name', async () => {
     const root = await render(name);
-    for (const s of root.querySelectorAll('svg[role="img"]')) {
+    const charts = root.querySelectorAll('svg[role="group"], svg[role="img"]');
+    expect(charts.length).toBeGreaterThan(0);
+    for (const s of charts) {
       expect(s.getAttribute('aria-label')?.length ?? 0).toBeGreaterThan(10);
+    }
+  });
+
+  it('never puts a focusable mark inside an accessibility-leaf svg', async () => {
+    // role="img" prunes descendants from the accessibility tree, so a focusable
+    // mark inside one is reachable by Tab and announces nothing.
+    const root = await render(name);
+    for (const s of root.querySelectorAll('svg[role="img"]')) {
+      expect(s.querySelectorAll('[tabindex="0"]').length, `${name}: focusable marks inside role=img`).toBe(0);
     }
   });
 

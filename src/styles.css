@@ -112,7 +112,8 @@ body.drawer-open { overflow: hidden; }
 .tabs { display: flex; gap: 1px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs a {
-  padding: 7px 10px; font-size: 0.79rem; font-weight: 500; text-decoration: none;
+  padding: 11px 10px; min-height: 40px; display: flex; align-items: center;
+  font-size: 0.79rem; font-weight: 500; text-decoration: none;
   color: var(--text-secondary); border-radius: var(--radius-sm); white-space: nowrap;
   transition: background 150ms ease;
 }
@@ -193,7 +194,7 @@ select, input[type='search'], input[type='text'] {
 }
 .pill button {
   border: 0; background: transparent; cursor: pointer; color: var(--text-secondary);
-  font-size: 0.95rem; line-height: 1; padding: 4px 6px; min-width: 26px; min-height: 26px;
+  font-size: 0.95rem; line-height: 1; padding: 6px 10px; min-width: 32px; min-height: 32px;
 }
 .pill button:hover { color: var(--status-bad); }
 
@@ -260,8 +261,9 @@ svg text { font-family: var(--font-sans); fill: var(--text-secondary); }
 
 .svg-zoom-controls { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 5; }
 .svg-zoom-controls button {
-  width: 30px; height: 30px; border-radius: var(--radius-sm); border: 1px solid var(--border-default);
-  background: rgba(255,255,255,0.94); cursor: pointer; font-size: 0.9rem; line-height: 1; color: var(--text-secondary);
+  width: 36px; height: 36px; min-width: 36px; min-height: 36px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-default);
+  background: rgba(255,255,255,0.94); cursor: pointer; font-size: 0.95rem; line-height: 1; color: var(--text-secondary);
 }
 .svg-zoom-controls button:hover { background: var(--accent); color: #fff; }
 .zoom-host { position: relative; }
@@ -289,10 +291,29 @@ svg text { font-family: var(--font-sans); fill: var(--text-secondary); }
 .leaflet-container { background: #eef2f5; font-family: var(--font-sans); }
 
 /* ── glossary ─────────────────────────────────────────── */
+/* Glossary buttons sit INLINE inside sentences, which is the one case WCAG 2.2
+   SC 2.5.8 (Target Size, Minimum, 24x24) explicitly exempts — a target "in a
+   sentence or block of text" is out of scope, because enlarging it would break
+   the line box it lives in.
+   The visual target was raised 17px -> 20px anyway, and a transparent ::after
+   overlays a larger area. BE SCEPTICAL OF THAT LAST PART: `elementFromPoint`
+   would not attribute a hit outside the 20px box back to the button in testing,
+   so the extra area is best treated as unverified belt-and-braces rather than a
+   claim. The targets that are NOT exempt were fixed outright and measured:
+   nav tabs 42px, zoom controls 36px, dialog close 44px, glossary close 40px,
+   filter-pill clear 32px. */
 .gloss {
+  /* z-index on the BUTTON, not just the pseudo: a positive index scoped inside
+     .gloss would still leave the button itself at flow order, and the inline
+     text that follows would keep winning the hit test. */
+  position: relative; z-index: 1;
   border: 0; background: var(--accent-soft); color: var(--accent); cursor: pointer;
-  width: 17px; height: 17px; border-radius: 50%; font-size: 0.66rem; font-weight: 700;
-  line-height: 1; padding: 0; margin-left: 4px; vertical-align: 1px;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 0.7rem; font-weight: 700;
+  line-height: 1; padding: 0; margin-left: 4px; vertical-align: -2px;
+}
+.gloss::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
 }
 .gloss:hover { background: var(--accent); color: #fff; }
 .gloss-pop {
@@ -303,7 +324,7 @@ svg text { font-family: var(--font-sans); fill: var(--text-secondary); }
 .gloss-pop h4 { font-size: 0.85rem; margin-bottom: 5px; }
 .gloss-pop p { font-size: 0.82rem; color: var(--text-secondary); }
 .gloss-pop .gloss-close {
-  position: absolute; top: 4px; right: 4px; width: 30px; height: 30px;
+  position: absolute; top: 2px; right: 2px; width: 40px; height: 40px;
   border: 0; background: transparent; cursor: pointer; color: var(--text-muted); font-size: 1rem;
 }
 
@@ -371,6 +392,18 @@ svg text { font-family: var(--font-sans); fill: var(--text-secondary); }
 /* Links are underlined, not distinguished by colour alone. */
 .footer-inner a { color: var(--accent); text-decoration: underline; }
 .footer-inner a:hover { color: var(--accent-hover); }
+
+/* CHART LEGIBILITY ON A PHONE.
+   A chart authored on a 900px viewBox inside a 350px column is scaled to ~39%,
+   which renders 10.5px axis labels at about 4 CSS pixels — present, and
+   unreadable. Give every chart a floor width and let its own card scroll
+   horizontally instead of shrinking the type into nothing. */
+@media (max-width: 700px) {
+  .card-body.scroll-x > svg,
+  .zoom-host > svg { min-width: 640px; }
+  /* The map and the cohort small multiples are built to fit and must not. */
+  .map-frame svg, .map-frame, .card-body .grid svg { min-width: 0; }
+}
 
 @media (max-width: 768px) {
   .header-inner { flex-wrap: wrap; gap: 8px; }

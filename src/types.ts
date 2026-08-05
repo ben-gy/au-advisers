@@ -33,6 +33,8 @@ export interface AdviserIndex {
   apps: number[];
   /** bitmask over meta.daTypes */
   da: number[];
+  /** 0 = none, -1 = an action is still running, otherwise the year it ended. */
+  daEnd: number[];
   /** bitmask over meta.owners order */
   own: number[];
   cpd: string[];

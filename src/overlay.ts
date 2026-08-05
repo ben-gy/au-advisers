@@ -119,6 +119,19 @@ export function openOverlay(opts: {
   return { host, panel, scrim, close, isOpen: () => !closed };
 }
 
+/**
+ * Close every open overlay.
+ *
+ * Called on view navigation. Without it a drawer opened on one view stays
+ * floating over the next one — the reader appears to navigate "behind" a panel,
+ * and on a phone the panel is full-width so the new view is entirely hidden.
+ * Removing the host runs the same teardown as the ✕, including the scroll lock.
+ */
+export function closeAllOverlays(): void {
+  for (const host of [...document.querySelectorAll('.overlay-host')]) host.remove();
+  syncScrollLock();
+}
+
 /** The mandatory ✕. `click`, not `pointerdown`, so Enter and Space reach it. */
 export function closeButton(onClose: () => void, label = 'Close'): HTMLButtonElement {
   const b = document.createElement('button');

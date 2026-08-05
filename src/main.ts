@@ -4,7 +4,7 @@
 import './styles.css';
 import { initTooltip, hideTooltip } from './components/tooltip.ts';
 import { initGlossary } from './glossary.ts';
-import { openOverlay, closeButton } from './overlay.ts';
+import { openOverlay, closeButton, closeAllOverlays } from './overlay.ts';
 import { getMeta, DataError } from './data.ts';
 import { el } from './views/svg.ts';
 import { parseHash, type ViewCtx } from './router.ts';
@@ -56,12 +56,17 @@ async function render(): Promise<void> {
   document.querySelectorAll<HTMLAnchorElement>('.tabs a').forEach((a) => {
     const active = a.dataset.view === view;
     a.classList.toggle('active', active);
-    if (active) a.setAttribute('aria-current', 'page');
-    else a.removeAttribute('aria-current');
+    if (active) {
+      a.setAttribute('aria-current', 'page');
+      // The tab strip scrolls horizontally on a phone, and the active tab was
+      // routinely scrolled out of sight — leaving no indication of where you are.
+      a.scrollIntoView({ inline: 'center', block: 'nearest' });
+    } else a.removeAttribute('aria-current');
   });
 
-  // A tooltip must never survive a view change.
+  // Neither a tooltip nor an overlay may survive a view change.
   hideTooltip();
+  if (view !== currentView) closeAllOverlays();
 
   if (view !== currentView) {
     root.replaceChildren(el('div', 'loading', 'Loading…'));
@@ -189,7 +194,15 @@ function shell(m: Meta): void {
   app.replaceChildren();
 
   const skip = el('a', 'skip', 'Skip to content') as HTMLAnchorElement;
-  skip.href = '#view-root';
+  // NOT href="#view-root": every hash on this site is a route, so the skip link
+  // navigated the reader to the Overview instead of moving focus. Move focus
+  // directly and leave the URL alone.
+  skip.href = '#';
+  skip.addEventListener('click', (e) => {
+    e.preventDefault();
+    const m = document.getElementById('view-root');
+    if (m) { m.setAttribute('tabindex', '-1'); m.focus(); }
+  });
 
   const header = el('header', 'site-header');
   const inner = el('div', 'header-inner');

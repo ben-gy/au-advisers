@@ -25,8 +25,8 @@ export async function renderWhere({ root, meta }: ViewCtx): Promise<void> {
   head.appendChild(el('h1', undefined, 'Where the advisers are'));
   const p = el('p');
   p.appendChild(document.createTextNode(
-    `${num(geo.coverage.mappedAdvisers)} currently registered advisers, mapped to the postcode of their business ` +
-    'address on real ABS postal-area boundaries.',
+    `${num(geo.coverage.mappedAdvisers)} of ${num(meta.currentAdvisers)} currently registered advisers, mapped to ` +
+    'the postcode of their business address on real ABS postal-area boundaries.',
   ));
   const g = glossaryButton('per10k');
   if (g) p.appendChild(g);
@@ -72,13 +72,15 @@ export async function renderWhere({ root, meta }: ViewCtx): Promise<void> {
 
   const paintLegend = () => {
     const b = mode === 'rate' ? breaks : countBreaks;
+    const bands = b.length + 1;
+    const fmt = (x: number) => (mode === 'rate' ? rate(x) : num(Math.round(x)));
+    // One swatch per BAND, using the identical expression the map uses, so the
+    // legend cannot drift from what is painted.
     legendHost.replaceChildren(legend([
       { color: NONE_COLOR, label: 'No registered adviser' },
-      ...b.map((_v, i) => ({
-        color: densityColor((i + 1) / (b.length + 1)),
-        label: i === 0
-          ? `under ${mode === 'rate' ? rate(b[0]) : num(Math.round(b[0]))}`
-          : `${mode === 'rate' ? rate(b[i - 1]) : num(Math.round(b[i - 1]))}+`,
+      ...Array.from({ length: bands }, (_, i) => ({
+        color: densityColor(bands > 1 ? i / (bands - 1) : 0.5),
+        label: i === 0 ? `under ${fmt(b[0])}` : `${fmt(b[i - 1])}+`,
       })),
     ]));
   };
@@ -102,8 +104,12 @@ export async function renderWhere({ root, meta }: ViewCtx): Promise<void> {
     if (!row) return { fillColor: NONE_COLOR, fillOpacity: 0.65, color: '#ffffff', weight: 0.3 };
     const v = mode === 'rate' ? row.per10k : row.n;
     if (v == null) return { fillColor: NONE_COLOR, fillOpacity: 0.65, color: '#ffffff', weight: 0.3 };
+    // quantileBreaks(v, 7) returns up to 6 edges = 7 bands (0..6). Normalising
+    // by (band+1)/(edges+1) never reaches 1, so the darkest ramp stop was
+    // unreachable and the top two bands painted identically.
     const b = mode === 'rate' ? breaks : countBreaks;
-    const t = (bandOf(v, b) + 1) / (b.length + 1);
+    const bands = b.length + 1;
+    const t = bands > 1 ? bandOf(v, b) / (bands - 1) : 0.5;
     return { fillColor: densityColor(t), fillOpacity: 0.82, color: '#ffffff', weight: 0.3 };
   };
 
@@ -170,7 +176,9 @@ export async function renderWhere({ root, meta }: ViewCtx): Promise<void> {
   const cov = geo.coverage;
   const honesty = el('div', 'note');
   honesty.innerHTML = `<strong>What this map cannot show.</strong>
-    ${num(cov.mappedAdvisers)} of ${num(meta.currentAppointments)} current appointments are placed here.
+    ${num(cov.mappedAdvisers)} of ${num(meta.currentAdvisers)} currently registered advisers are placed here
+    (${num(cov.mappedAppointments)} adviser–postcode placements, since a person authorised by two firms in
+    different postcodes appears in both).
     ${num(cov.unmappableAdvisers)} are not: ${num(cov.poBox.reduce((s, x) => s + x.n, 0))} give a PO-box or
     large-volume-receiver postcode (${cov.poBox.slice(0, 6).map((x) => esc(x.pc)).join(', ')}${cov.poBox.length > 6 ? '…' : ''}),
     which ABS does not publish as an area because nobody lives in it, and
@@ -185,14 +193,17 @@ export async function renderWhere({ root, meta }: ViewCtx): Promise<void> {
 
   // ── leaderboards ──────────────────────────────────────
   const board = chartCard(
-    'Best and least served',
-    `Postcodes with at least 2,000 residents, ranked by advisers per 10,000 people. Click a row for the firms there.`,
+    'Most and fewest advisers based here, per 10,000 residents',
+    'Postcodes with at least 2,000 residents. The numerator is advisers whose BUSINESS address is in the ' +
+    'postcode, not advisers serving the people who live there — a CBD postcode with few residents and many ' +
+    'offices scores enormously high, and that is a fact about where offices are, not about how well served ' +
+    'anyone is. Click a row for the firms there.',
   );
   const big = geo.advised.filter((r) => (r.pop ?? 0) >= 2000 && r.per10k != null);
   const grid = el('div', 'grid grid-2');
   grid.append(
-    boardTable('Most advisers per resident', [...big].sort((a, b) => b.per10k! - a.per10k!).slice(0, 15), licensees, meta),
-    boardTable('Fewest advisers per resident', [...big].sort((a, b) => a.per10k! - b.per10k!).slice(0, 15), licensees, meta),
+    boardTable('Most advisers based here, per resident', [...big].sort((a, b) => b.per10k! - a.per10k!).slice(0, 15), licensees, meta),
+    boardTable('Fewest advisers based here, per resident', [...big].sort((a, b) => a.per10k! - b.per10k!).slice(0, 15), licensees, meta),
   );
   board.body.appendChild(grid);
   root.appendChild(board.card);

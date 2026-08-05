@@ -83,8 +83,10 @@ function summary(
   if (cur.length) {
     add('Currently authorised by', cur.map((a) => `<strong>${esc(titleCase(licensees[a.l]?.name ?? '—'))}</strong>`).join('<br>'));
   } else {
-    const last = apps[apps.length - 1];
-    add('Last appointment ended', date(last?.e ?? null));
+    // apps is sorted by START date, so the last element is not necessarily the
+    // one that ended last — take the maximum end date explicitly.
+    const lastEnd = apps.reduce<string | null>((m, a) => (a.e && (!m || a.e > m) ? a.e : m), null);
+    add('Last appointment ended', date(lastEnd));
   }
   add('Appointments recorded', `${num(apps.length)} at ${num(new Set(apps.map((a) => a.l)).size)} licensee(s)`);
   if (adv.pc[i]) add('Business location', `${esc(adv.pc[i])} ${esc(meta.states[adv.st[i]] ?? '')}`.trim());
@@ -99,22 +101,35 @@ function summary(
   }
   s.appendChild(dl);
 
-  const das = apps.filter((a) => a.d);
-  const cpd = adv.cpd[i];
-  if (das.length || cpd) {
+  // DISTINCT actions — the same action is repeated on every appointment row it
+  // touches, so listing rows would tell a reader this person was disciplined
+  // three times when they were disciplined once.
+  const seenDa = new Set<string>();
+  const das = apps.filter((a) => {
+    if (!a.d) return false;
+    const key = `${a.d.t}|${a.d.s ?? ''}|${a.d.e ?? ''}`;
+    if (seenDa.has(key)) return false;
+    seenDa.add(key);
+    return true;
+  });
+  if (das.length) {
     const box = el('div', 'note');
     box.style.borderLeftColor = CONDUCT_COLOR;
-    const bits: string[] = [];
-    if (das.length) {
-      bits.push(`<strong>ASIC has recorded ${das.length === 1 ? 'a disciplinary action' : `${das.length} disciplinary actions`} against this adviser.</strong> ` +
-        das.map((a) => `${esc(meta.daTypes[a.d!.t] ?? 'Action')}${a.d!.s ? `, from ${date(a.d!.s)}` : ''}${a.d!.e ? ` to ${date(a.d!.e)}` : ''}` +
-          (a.d!.x ? `<br><span class="sub">${esc(a.d!.x)}</span>` : '')).join('<br>'));
-    }
-    if (cpd) {
-      bits.push(`A continuing professional development shortfall was reported for <strong>${esc(cpd.split(',').join(', '))}</strong>. ` +
-        'That is a training compliance issue, not a finding of misconduct.');
-    }
-    box.innerHTML = bits.join('<br><br>');
+    box.innerHTML =
+      `<strong>ASIC has recorded ${das.length === 1 ? 'a disciplinary action' : `${das.length} disciplinary actions`} against this adviser.</strong> ` +
+      das.map((a) => `${esc(meta.daTypes[a.d!.t] ?? 'Action')}${a.d!.s ? `, from ${date(a.d!.s)}` : ''}${a.d!.e ? ` to ${date(a.d!.e)}` : ''}` +
+        (a.d!.x ? `<br><span class="sub">${esc(a.d!.x)}</span>` : '')).join('<br>');
+    s.appendChild(box);
+  }
+  // A CPD shortfall gets its OWN neutral note. Painting it in the colour this
+  // site reserves for regulatory action put 459 people who simply missed a
+  // training requirement behind the same amber bar as a banning.
+  const cpd = adv.cpd[i];
+  if (cpd) {
+    const box = el('div', 'note');
+    box.innerHTML = `A continuing professional development shortfall was reported for ` +
+      `<strong>${esc(cpd.split(',').join(', '))}</strong>. CPD is mandatory annual training; a shortfall is a ` +
+      `compliance matter reported by the licensee, <strong>not</strong> a finding of misconduct and not an ASIC action.`;
     s.appendChild(box);
   }
   return s;
@@ -136,8 +151,16 @@ function ribbon(apps: Appointment[], licensees: Licensee[], meta: Meta): HTMLEle
   const lanes = careerLanes(spans);
   const laneCount = Math.max(...lanes.map((l) => l.lane)) + 1;
 
-  const minY = Math.floor(Math.min(...spans.map((s2) => s2.from)));
-  const maxY = Math.ceil(Math.max(...spans.map((s2) => s2.to)));
+  // The time axis must span the DISCIPLINARY dates too. Built from appointment
+  // spans alone, 351 of the 859 action markers fell outside the viewBox and were
+  // simply invisible — an ASIC action silently missing from the one page a
+  // person is most likely to be judged on.
+  const daYears = apps
+    .flatMap((a) => [a.d?.s, a.d?.e])
+    .map((iso) => yearFraction(iso ?? null))
+    .filter((y): y is number => y != null);
+  const minY = Math.floor(Math.min(...spans.map((s2) => s2.from), ...daYears));
+  const maxY = Math.ceil(Math.max(...spans.map((s2) => s2.to), ...daYears));
   const W = 520;
   const laneH = 26;
   const pad = { l: 6, r: 6, t: 6, b: 22 };

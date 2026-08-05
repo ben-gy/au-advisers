@@ -187,13 +187,23 @@ export async function renderExplorer({ root, meta, params }: ViewCtx): Promise<v
       tr.tabIndex = 0;
       const lic = licensees[adv.lic[i]];
       const ownBits = meta.owners.map((o, oi) => (adv.own[i] & (1 << oi)) ? o : null).filter(Boolean);
+      // DATED, and past tense where it belongs. 142 of the 277 people carrying
+      // an ASIC record have no action still in force, and an undated,
+      // present-tense badge beside a named individual reads as a live finding
+      // against them. daEnd: 0 = none, -1 = still running, else the end year.
+      const de = adv.daEnd?.[i] ?? -1;
       const daBadge = adv.da[i]
-        ? `<span class="badge badge-conduct" style="margin-left:6px">ASIC action</span>` : '';
+        ? `<span class="badge badge-conduct" style="margin-left:6px" title="${de === -1
+            ? 'An ASIC action against this adviser is still in force'
+            : `ASIC action, ended ${de}`}">ASIC action${de === -1 ? '' : ` · ended ${de}`}</span>`
+        : '';
       tr.innerHTML =
         `<td class="name-cell">${esc(personName(adv.name[i]))}${daBadge}` +
         `<div class="sub" style="font-family:var(--font-mono)">${esc(adv.n[i])}</div></td>` +
         `<td>${adv.cur[i] ? '<span class="badge badge-current">current</span>' : '<span class="badge badge-ceased">ceased</span>'}</td>` +
-        `<td>${esc(titleCase(lic?.name ?? '—')).slice(0, 44)}` +
+        // Truncate FIRST, then escape — slicing escaped text can cut an HTML
+        // entity in half and render "&amp" as literal text.
+        `<td>${esc(titleCase(lic?.name ?? '—').slice(0, 44))}` +
         (ownBits.length ? `<div class="sub">${ownBits.map((o) => `<span style="color:${ownerColor(o!.id)}">${esc(o!.label)}</span>`).join(' · ')}</div>` : '') +
         `</td>` +
         `<td>${esc(adv.pc[i] || '')} ${esc(meta.states[adv.st[i]] ?? '')}</td>` +

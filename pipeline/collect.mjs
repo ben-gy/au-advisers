@@ -283,6 +283,12 @@ for (const [advNumber, career] of careers) {
     start: dayToISO(career[0].start),
     end: cur.length ? null : dayToISO(Math.max(...career.map((a) => a.end ?? a.start))),
     da: das.length ? [...new Set(das.map((a) => DA_TYPES.indexOf(a.daType)).filter((i) => i >= 0))] : [],
+    // The year the adviser's LAST action ended, or null if one is still running.
+    // Without this the UI can only say "ASIC action" in the present tense, which
+    // is wrong for the 142 of 277 whose actions have all expired.
+    daEnd: das.length
+      ? (das.some((a) => a.daEnd == null) ? null : dayToYear(Math.max(...das.map((a) => a.daEnd))))
+      : undefined,
     cpd,
     own: [...owners],
     sub: latest.subType,
@@ -610,6 +616,8 @@ write('advisers.json', {
   da: advList.map((a) => a.da.reduce((m, i) => m | (1 << i), 0)),
   own: advList.map((a) => a.own.reduce((m, id) => m | (1 << OWNER_IDS.indexOf(id)), 0)),
   cpd: advList.map((a) => (a.cpd.length ? a.cpd.join(',') : '')),
+  // 0 = no action, -1 = an action is still running, otherwise the end year.
+  daEnd: advList.map((a) => (a.da.length ? (a.daEnd == null ? -1 : a.daEnd) : 0)),
 });
 
 // Dossier detail is only ever needed for ONE person at a time, so it is sharded

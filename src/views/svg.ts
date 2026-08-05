@@ -49,9 +49,21 @@ export function niceTicks(max: number, count = 5): number[] {
   return out;
 }
 
-/** Accessible name for a chart that is a figure, not an image of one. */
+/**
+ * Accessible name for a chart.
+ *
+ * `role="group"`, deliberately NOT `role="img"`. An `img` role makes the SVG a
+ * LEAF in the accessibility tree and prunes every descendant — so on the charts
+ * here, whose marks are focusable buttons, a screen-reader user could Tab onto
+ * a control that announced nothing at all. `group` keeps the accessible name
+ * and keeps the children reachable.
+ *
+ * This is set on the container rather than promoted lazily from `mark()`,
+ * because marks are built and labelled BEFORE they are appended — at that point
+ * `closest('svg')` is still null and any promotion would silently never happen.
+ */
 export function describe(node: SVGElement, label: string): void {
-  node.setAttribute('role', 'img');
+  node.setAttribute('role', 'group');
   node.setAttribute('aria-label', label);
 }
 
