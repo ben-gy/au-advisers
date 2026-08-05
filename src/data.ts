@@ -15,6 +15,22 @@ import type {
 
 const cache = new Map<string, Promise<unknown>>();
 
+/**
+ * KEEPING THE COPY AND THE NUMBERS IN STEP.
+ *
+ * The JS bundle is content-hashed, so a deploy busts it immediately. The data
+ * files are not, and GitHub Pages serves them with `max-age=600` — so for up to
+ * ten minutes after a data refresh a returning visitor can run the NEW bundle
+ * against the OLD numbers. That was observed live: the page showed the corrected
+ * copy beside the superseded figures, which is worse than showing either alone.
+ *
+ * `meta.json` is therefore always revalidated (an etag round-trip, a few
+ * hundred bytes), and every other data file is then versioned by the as-at date
+ * meta reports. A data refresh changes that date, which changes every URL, so
+ * the browser cannot serve a stale file alongside fresh copy.
+ */
+let dataVersion = '';
+
 export class DataError extends Error {
   constructor(readonly file: string, cause: unknown) {
     super(`Could not load ${file}: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -22,12 +38,13 @@ export class DataError extends Error {
   }
 }
 
-function load<T>(file: string): Promise<T> {
+function load<T>(file: string, opts: { revalidate?: boolean } = {}): Promise<T> {
   const hit = cache.get(file);
   if (hit) return hit as Promise<T>;
   const p = (async () => {
     try {
-      const res = await fetch(`data/${file}`);
+      const url = `data/${file}${dataVersion && !opts.revalidate ? `?v=${dataVersion}` : ''}`;
+      const res = await fetch(url, opts.revalidate ? { cache: 'no-cache' } : undefined);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return (await res.json()) as T;
     } catch (err) {
@@ -41,7 +58,12 @@ function load<T>(file: string): Promise<T> {
   return p;
 }
 
-export const getMeta = () => load<Meta>('meta.json');
+export const getMeta = (): Promise<Meta> =>
+  load<Meta>('meta.json', { revalidate: true }).then((m) => {
+    // Every subsequent data URL carries this, so copy and numbers cannot drift.
+    dataVersion = m.asAt ?? '';
+    return m;
+  });
 export const getLicensees = () => load<Licensee[]>('licensees.json');
 export const getAdvisers = () => load<AdviserIndex>('advisers.json');
 export const getSeries = () => load<{ years: number[]; dated: SeriesRow[]; naive: SeriesRow[] }>('series.json');
