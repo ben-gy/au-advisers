@@ -19,7 +19,8 @@ import {
   alumniByOwner, cohortSurvival, entryExit, parseChain, ownerOfName, OWNER_GROUPS,
   parseQualifications, parseList, authFlags, dayToISO, dayToYear, parseDate, EXIT_NODE,
   gateRowConservation, gateStatusCoherence, gateDatingRule, gateMovementConservation,
-  gateGeographyScope, gateCensusAnchor, gateBoundaryCoverage, gateSurvivorship, reportGate, gateFailures,
+  gateGeographyScope, gateCensusAnchor, gateBoundaryCoverage, gateSurvivorship, gateSeriesEra,
+  distinctActions, REGISTER_START_YEAR, reportGate, gateFailures,
 } from './parse.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -179,7 +180,7 @@ const missing = REQUIRED_COLUMNS.filter((c) => !header.includes(c));
 if (missing.length) throw new Error(`register is missing expected columns: ${missing.join(', ')}`);
 if (rows.length < 50000) throw new Error(`register has only ${rows.length} rows — refusing to ship a truncated file`);
 
-const { appointments, rejected } = buildAppointments(rows);
+const { appointments, rejected } = buildAppointments(rows, header.length);
 const careers = buildCareers(appointments);
 const movements = buildMovements(careers);
 log(`  ${appointments.length} appointments, ${careers.size} advisers, ${movements.edges.length} edges`);
@@ -195,7 +196,7 @@ const gates = [
   gateRowConservation(rows.length, appointments.length, rejected),
   gateStatusCoherence(appointments),
   gateDatingRule(appointments),
-  gateMovementConservation(careers, movements),
+  gateMovementConservation(careers, movements, appointments),
   gateGeographyScope(appointments),
 ];
 log('\nGATES');
@@ -323,7 +324,7 @@ for (const [advNumber, career] of careers) {
 
 // ── series ──────────────────────────────────────────────────────────────
 const YEARS = [];
-for (let y = 1999; y <= asAtYear; y++) YEARS.push(y);
+for (let y = REGISTER_START_YEAR; y <= asAtYear; y++) YEARS.push(y);
 log('  building owner series (dated)…');
 const seriesDated = ownerSeries(appointments, YEARS, true);
 log('  building owner series (naive)…');
@@ -344,9 +345,10 @@ const flow = entryExit(careers);
 
 // Runs here rather than with the first batch because it needs the cohorts.
 const survivorGate = gateSurvivorship(careers, cohorts);
-log(reportGate(survivorGate));
-if (!survivorGate.ok) throw new Error('survivorship gate failed');
-gates.push(survivorGate);
+const seriesGate = gateSeriesEra(seriesDated);
+for (const g of [survivorGate, seriesGate]) log(reportGate(g));
+if (!survivorGate.ok || !seriesGate.ok) throw new Error('survivorship/series gate failed');
+gates.push(survivorGate, seriesGate);
 
 // ── movement graph, trimmed to what a browser can render honestly ───────
 const edgesOut = movements.edges
@@ -507,14 +509,19 @@ for (const a of currentApps) {
 }
 
 // ── conduct ─────────────────────────────────────────────────────────────
+// DISTINCT actions — ASIC repeats the ADV_DA_* fields on every appointment row
+// of a disciplined adviser, so counting rows triples the published figure.
 const daRows = appointments.filter((a) => a.daType);
+const actions = distinctActions(appointments);
+log(`  conduct: ${daRows.length} appointment rows carry a disciplinary field, ` +
+  `= ${actions.length} distinct actions against ${new Set(actions.map((a) => a.advNumber)).size} advisers`);
 const daByType = {};
-for (const a of daRows) daByType[a.daType] = (daByType[a.daType] ?? 0) + 1;
-const disciplinedAdvisers = new Set(daRows.map((a) => a.advNumber));
+for (const a of actions) daByType[a.type] = (daByType[a.type] ?? 0) + 1;
+const disciplinedAdvisers = new Set(actions.map((a) => a.advNumber));
 const cpdAdvisers = new Set(appointments.filter((a) => a.cpdFailure).map((a) => a.advNumber));
 const daByYear = {};
-for (const a of daRows) {
-  const y = dayToYear(a.daStart);
+for (const a of actions) {
+  const y = dayToYear(a.start);
   if (y != null) daByYear[y] = (daByYear[y] ?? 0) + 1;
 }
 // Alumni-risk scatter: per licensee, share of its alumni who ever carry an
@@ -568,7 +575,8 @@ const meta = {
   exits: movements.exits,
   edges: movements.edges.length,
   conduct: {
-    actions: daRows.length,
+    actions: actions.length,
+    actionRows: daRows.length,
     advisers: disciplinedAdvisers.size,
     byType: daByType,
     byYear: daByYear,
@@ -635,14 +643,24 @@ write('authorisations.json', { keys: authKeys, totals: authTotals, byState: auth
 // polygon, so the ones it cannot draw are counted and named for the UI to state.
 const boundaryCodes = new Set(boundaries.features.map((f) => f.properties?.poa_code_2021).filter(Boolean));
 const unmappable = geo.filter((g) => !boundaryCodes.has(g.pc));
+// Counted as DISTINCT PEOPLE. Summing each postcode's adviser count double-counts
+// anyone holding current appointments at two firms in different postcodes, which
+// would let "advisers on this map" exceed the number of advisers that exist.
+const mappedSet = new Set();
+const unmappableSet = new Set();
+for (const a of currentApps) {
+  if (!a.postcode) continue;
+  (boundaryCodes.has(a.postcode) ? mappedSet : unmappableSet).add(a.advNumber);
+}
 const geoCoverage = {
   mappedPostcodes: geo.length - unmappable.length,
-  mappedAdvisers: geo.filter((g) => boundaryCodes.has(g.pc)).reduce((s, g) => s + g.n, 0),
+  mappedAdvisers: mappedSet.size,
+  mappedAppointments: geo.filter((g) => boundaryCodes.has(g.pc)).reduce((s, g) => s + g.n, 0),
   unmappablePostcodes: unmappable.length,
-  unmappableAdvisers: unmappable.reduce((s, g) => s + g.n, 0),
+  unmappableAdvisers: unmappableSet.size,
   poBox: unmappable.filter((g) => /^\d{4}$/.test(g.pc)).map((g) => ({ pc: g.pc, n: g.n })),
   malformed: unmappable.filter((g) => !/^\d{4}$/.test(g.pc)).map((g) => ({ pc: g.pc, n: g.n })),
-  noPostcode: currentApps.filter((a) => !a.postcode).length,
+  noPostcode: new Set(currentApps.filter((a) => !a.postcode).map((a) => a.advNumber)).size,
 };
 log(`  geography: ${geoCoverage.mappedAdvisers} advisers mappable, ` +
   `${geoCoverage.unmappableAdvisers} at PO-box/malformed postcodes, ${geoCoverage.noPostcode} with no address`);

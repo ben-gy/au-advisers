@@ -34,6 +34,8 @@ export function parseRegister(text, delim = '\t') {
     const cells = splitRow(lines[i], delim);
     const o = {};
     for (let c = 0; c < header.length; c++) o[header[c]] = (cells[c] ?? '').trim();
+    // Non-enumerable so it never leaks into authFlags() or any Object.entries walk.
+    Object.defineProperty(o, '__fieldCount', { value: cells.length, enumerable: false });
     rows.push(o);
   }
   return { header, rows };
@@ -134,7 +136,28 @@ export function ownersForAppointment(chain, startDay, dated = true) {
 
 // ── appointments ────────────────────────────────────────────────────────
 
-export const REJECTION_BUCKETS = ['no_adviser_number', 'no_licensee', 'unparsable_start_date'];
+export const REJECTION_BUCKETS = [
+  'no_adviser_number', 'no_licensee', 'unparsable_start_date', 'field_count_mismatch',
+];
+
+/**
+ * THE STRAY TAB.
+ *
+ * Nine of the 89,060 data lines carry a literal tab inside a free-text column
+ * (a member's address or membership list), which in a tab-delimited file shifts
+ * every column after it by one or more places. The row still parses; it is
+ * simply wrong, and wrong in the worst possible way — it published one named
+ * adviser's professional MEMBERSHIPS in the position the site reads as a
+ * regulatory "further restriction".
+ *
+ * There is no safe way to re-align a row once the delimiter itself is corrupt,
+ * so these rows are rejected into a named bucket rather than guessed at. Nine
+ * rows out of 89,060 is a rounding error; publishing a fabricated restriction
+ * against a real person is not.
+ */
+export function hasFieldCountMismatch(row, expectedFields) {
+  return row.__fieldCount != null && row.__fieldCount !== expectedFields;
+}
 
 /**
  * Normalise raw register rows into appointment records.
@@ -142,12 +165,16 @@ export const REJECTION_BUCKETS = ['no_adviser_number', 'no_licensee', 'unparsabl
  * Row conservation is a gate: accepted + every rejection bucket must equal the
  * source row count.
  */
-export function buildAppointments(rows) {
+export function buildAppointments(rows, expectedFields = null) {
   const appointments = [];
   const rejected = Object.fromEntries(REJECTION_BUCKETS.map((b) => [b, 0]));
   const rejectedRows = [];
 
   for (const r of rows) {
+    // A stray tab shifts every later column; the row cannot be trusted at all.
+    if (expectedFields != null && hasFieldCountMismatch(r, expectedFields)) {
+      rejected.field_count_mismatch++; rejectedRows.push(r); continue;
+    }
     const advNumber = (r.ADV_NUMBER || '').trim();
     if (!advNumber) { rejected.no_adviser_number++; rejectedRows.push(r); continue; }
     const licNumber = (r.LICENCE_NUMBER || '').trim();
@@ -305,6 +332,10 @@ export function buildMovements(careers) {
  * range. `dated` toggles the correctness guard so the site can render both.
  */
 export function ownerSeries(appointments, years, dated = true) {
+  // Callers must not pass years before REGISTER_START_YEAR — see gateSeriesEra.
+  // The register cannot see anyone who left before it began, so a headcount for
+  // 2005 counts only the people who were STILL THERE in 2015, and the resulting
+  // line rises from nothing to the truth purely as an artefact of coverage.
   const out = [];
   for (const year of years) {
     const asAt = parseDate(`30/06/${year}`);
@@ -506,7 +537,7 @@ export function gateDatingRule(appointments) {
  * must contribute exactly L-1 transitions, plus one exit edge iff they hold no
  * current appointment. Checked against the totals the graph actually emitted.
  */
-export function gateMovementConservation(careers, movements) {
+export function gateMovementConservation(careers, movements, appointments = null) {
   let expectedTransitions = 0;
   let expectedExits = 0;
   for (const career of careers.values()) {
@@ -519,6 +550,43 @@ export function gateMovementConservation(careers, movements) {
   }
   const edgeSum = movements.edges.reduce((s, e) => s + e.count, 0);
   const problems = [];
+
+  // ANCHOR THE GATE OUTSIDE THE THING IT CHECKS.
+  //
+  // Recomputing the expectation from the same `careers` map that produced the
+  // graph makes this a tautology: reverse every career and both sides move
+  // together, so the gate stays green while every arrow points backwards.
+  // Anchoring on the raw appointments — which know nothing about ordering —
+  // gives an independent expectation, and separately asserting that edges run
+  // FORWARD IN TIME is what actually catches a reversed graph.
+  if (appointments) {
+    const byAdviser = new Map();
+    for (const a of appointments) {
+      let set = byAdviser.get(a.advNumber);
+      if (!set) { set = new Set(); byAdviser.set(a.advNumber, set); }
+      set.add(a.licNumber);
+    }
+    // Distinct licensees per adviser minus one is a LOWER bound on transitions
+    // (a returning adviser adds a move without adding a licensee).
+    let lowerBound = 0;
+    for (const set of byAdviser.values()) lowerBound += set.size - 1;
+    if (movements.transitions < lowerBound) {
+      problems.push(`transitions ${movements.transitions} below the independent lower bound ${lowerBound}`);
+    }
+    // Every edge must be traversable forward in time by at least one adviser.
+    let backwards = 0;
+    let checked = 0;
+    for (const career of careers.values()) {
+      for (let i = 1; i < career.length; i++) {
+        if (career[i].licNumber === career[i - 1].licNumber) continue;
+        checked++;
+        if (career[i].start < career[i - 1].start) backwards++;
+      }
+    }
+    if (checked > 0 && backwards > 0) {
+      problems.push(`${backwards} of ${checked} consecutive career steps go BACKWARDS in time — careers are mis-sorted`);
+    }
+  }
   if (movements.transitions !== expectedTransitions) {
     problems.push(`transitions ${movements.transitions} != expected ${expectedTransitions}`);
   }
@@ -531,8 +599,9 @@ export function gateMovementConservation(careers, movements) {
   return {
     name: 'movement-conservation',
     ok: problems.length === 0,
-    detail: `${movements.transitions} transitions + ${movements.exits} exits = ${edgeSum} edge weight`,
-    checks: 3,
+    detail: `${movements.transitions} transitions + ${movements.exits} exits = ${edgeSum} edge weight` +
+      (appointments ? ', anchored on raw appointments and forward-in-time' : ''),
+    checks: appointments ? 5 : 3,
     fails: problems.length,
     problems,
   };
@@ -734,6 +803,58 @@ export function gateSurvivorship(careers, cohorts) {
     detail: `${exitedBefore} pre-${REGISTER_START_YEAR} exits vs ${exitedAfter} after; ` +
       `${cohorts.length} cohorts, earliest ${cohorts.length ? cohorts[0].year : 'n/a'}`,
     checks: 2,
+    fails: problems.length,
+    problems,
+  };
+}
+
+/**
+ * DISTINCT disciplinary actions, not appointment rows.
+ *
+ * ASIC stamps the four ADV_DA_* fields onto EVERY appointment row belonging to a
+ * disciplined adviser, so counting rows multiplies each action by that person's
+ * number of appointments. One adviser appears on 16 rows for 2 actions. Counting
+ * rows reported 859 "disciplinary actions" where the register records 285 —
+ * a threefold overstatement of regulatory action, published on a page that names
+ * the individuals concerned. Actions are keyed on adviser + type + start + end.
+ */
+export function distinctActions(appointments) {
+  const seen = new Map();
+  for (const a of appointments) {
+    if (!a.daType) continue;
+    const key = `${a.advNumber}|${a.daType}|${a.daStart ?? ''}|${a.daEnd ?? ''}`;
+    if (!seen.has(key)) {
+      seen.set(key, {
+        advNumber: a.advNumber, type: a.daType, start: a.daStart, end: a.daEnd, desc: a.daDesc,
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+/**
+ * SERIES-ERA GATE.
+ *
+ * The same survivorship constraint as the cohorts, applied to the headcount
+ * series. The register cannot see anyone who left before it commenced, so a
+ * headcount for 2005 counts only the people still practising in 2015 — the line
+ * climbs from 382 to 21,340 across 1999-2014 purely as an artefact of coverage,
+ * and a reader sees "the profession quadrupled". It did not.
+ */
+export function gateSeriesEra(series) {
+  const early = series.filter((r) => r.year < REGISTER_START_YEAR);
+  const problems = [];
+  if (early.length) {
+    problems.push(
+      `${early.length} series year(s) predate ${REGISTER_START_YEAR} (earliest ${early[0].year}, ` +
+      `total ${early[0].total}) — pre-register headcount is coverage, not the profession`,
+    );
+  }
+  return {
+    name: 'series-era',
+    ok: problems.length === 0,
+    detail: `${series.length} year(s), ${series.length ? `${series[0].year}-${series[series.length - 1].year}` : 'none'}`,
+    checks: 1,
     fails: problems.length,
     problems,
   };

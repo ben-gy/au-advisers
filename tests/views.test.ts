@@ -55,9 +55,9 @@ async function render(name: string, params = ''): Promise<HTMLElement> {
 const VIEWS = ['overview', 'retreat', 'movements', 'ownership', 'cohorts', 'diaspora', 'conduct', 'authorisations', 'explorer'];
 
 describe('data files are present and internally consistent', () => {
-  it('meta reports all eight gates passing', () => {
+  it('meta reports all nine gates passing', () => {
     const m = meta();
-    expect(m.gates.length).toBe(8);
+    expect(m.gates.length).toBe(9);
     for (const g of m.gates) expect(g.ok, `${g.name}: ${g.detail}`).toBe(true);
   });
 
@@ -257,6 +257,40 @@ describe('diaspora', () => {
   it('draws an explicit "left the register" band', async () => {
     const root = await render('diaspora');
     expect(root.textContent).toMatch(/Left the register/i);
+  });
+});
+
+describe('the review findings, pinned against the shipped data', () => {
+  it('counts DISTINCT disciplinary actions, not appointment rows', () => {
+    // ASIC repeats the ADV_DA_* fields on every appointment row of a disciplined
+    // adviser. Counting rows published 859 "actions" where there are 285 — a
+    // threefold overstatement of regulatory action against named individuals.
+    const c = meta().conduct;
+    expect(c.actions).toBeLessThan(c.actionRows);
+    expect(c.actions).toBeGreaterThanOrEqual(c.advisers);
+    // The per-type breakdown must sum to the DISTINCT total, not the row total.
+    const sum = Object.values(c.byType).reduce((a: number, b) => a + (b as number), 0);
+    expect(sum).toBe(c.actions);
+  });
+
+  it('never charts a headcount year the register could not observe', () => {
+    for (const r of read('series.json').dated) expect(r.year).toBeGreaterThanOrEqual(2015);
+    for (const r of read('series.json').naive) expect(r.year).toBeGreaterThanOrEqual(2015);
+  });
+
+  it('rejects the nine stray-tab rows rather than publishing shifted columns', () => {
+    const m = meta();
+    expect(m.rejected.field_count_mismatch).toBeGreaterThan(0);
+    // Row conservation must still hold with the new bucket.
+    const rejected = Object.values(m.rejected).reduce((a: number, b) => a + (b as number), 0);
+    expect(m.appointments + rejected).toBe(m.rows);
+  });
+
+  it('counts mappable advisers as PEOPLE, so the map cannot claim more than exist', () => {
+    const cov = read('geography.json').coverage;
+    expect(cov.mappedAdvisers).toBeLessThanOrEqual(meta().currentAdvisers);
+    // The appointment sum is the larger number and is kept separately.
+    expect(cov.mappedAppointments).toBeGreaterThanOrEqual(cov.mappedAdvisers);
   });
 });
 

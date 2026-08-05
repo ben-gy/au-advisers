@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest';
 import {
   parseRegister, buildAppointments, buildCareers, buildMovements,
   gateRowConservation, gateStatusCoherence, gateDatingRule, gateMovementConservation,
-  gateGeographyScope, gateCensusAnchor, gateBoundaryCoverage, gateSurvivorship, cohortSurvival, gateFailures,
+  gateGeographyScope, gateCensusAnchor, gateBoundaryCoverage, gateSurvivorship, gateSeriesEra,
+  cohortSurvival, distinctActions, gateFailures,
   CENSUS_2021_PERSONS,
 } from '../pipeline/parse.mjs';
 import type { Appointment } from '../pipeline/parse.mjs';
@@ -353,6 +354,61 @@ describe('gateSurvivorship — the bias that shipped a meaningless 98.8%', () =>
     const g = gateSurvivorship(careers, []);
     expect(g.ok).toBe(false);
     expect(g.problems[0]).toContain('stale');
+  });
+});
+
+describe('gateSeriesEra', () => {
+  it('passes on a series that starts at the register commencement', () => {
+    expect(gateSeriesEra([{ year: 2015, total: 100 }, { year: 2016, total: 120 }]).ok).toBe(true);
+  });
+
+  it('FAILS on the pre-register ramp that read as the profession quadrupling', () => {
+    const g = gateSeriesEra([{ year: 1999, total: 382 }, { year: 2014, total: 21340 }]);
+    expect(g.ok).toBe(false);
+    expect(g.problems[0]).toContain('1999');
+  });
+});
+
+describe('distinctActions', () => {
+  it('de-duplicates an action repeated across an adviser\'s appointment rows', () => {
+    const { rows } = parseRegister([HEADER,
+      row({ ADV_NUMBER: '1', LICENCE_NUMBER: 'A', ADV_DA_TYPE: 'AFS banned/disqualification' }),
+      row({ ADV_NUMBER: '1', LICENCE_NUMBER: 'B', ADV_DA_TYPE: 'AFS banned/disqualification' }),
+      row({ ADV_NUMBER: '1', LICENCE_NUMBER: 'C', ADV_DA_TYPE: 'AFS banned/disqualification' }),
+    ].join('\n'));
+    const { appointments } = buildAppointments(rows);
+    // Three rows, one action — counting rows would treble it.
+    expect(appointments.filter((a) => a.daType)).toHaveLength(3);
+    expect(distinctActions(appointments)).toHaveLength(1);
+  });
+
+  it('keeps two genuinely different actions against the same adviser', () => {
+    const { rows } = parseRegister([HEADER,
+      row({ ADV_NUMBER: '1', LICENCE_NUMBER: 'A', ADV_DA_TYPE: 'AFS banned/disqualification' }),
+      row({ ADV_NUMBER: '1', LICENCE_NUMBER: 'B', ADV_DA_TYPE: 'Enforceable undertaking' }),
+    ].join('\n'));
+    expect(distinctActions(buildAppointments(rows).appointments)).toHaveLength(2);
+  });
+
+  it('returns nothing when no action is recorded', () => {
+    const { rows } = parseRegister([HEADER, row({})].join('\n'));
+    expect(distinctActions(buildAppointments(rows).appointments)).toHaveLength(0);
+  });
+});
+
+describe('field-count mismatch — the stray tab', () => {
+  it('rejects a row whose stray tab shifted every later column', () => {
+    const good = row({ ADV_NUMBER: '1' });
+    const shifted = `${good}\textra`;
+    const { header, rows } = parseRegister([HEADER, good, shifted].join('\n'));
+    const { appointments, rejected } = buildAppointments(rows, header.length);
+    expect(appointments).toHaveLength(1);
+    expect(rejected.field_count_mismatch).toBe(1);
+  });
+
+  it('accepts everything when no expected width is supplied, preserving old behaviour', () => {
+    const { rows } = parseRegister([HEADER, `${row({ ADV_NUMBER: '1' })}\textra`].join('\n'));
+    expect(buildAppointments(rows).appointments).toHaveLength(1);
   });
 });
 

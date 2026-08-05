@@ -144,7 +144,10 @@ function aboutModal(m: Meta): void {
         Persons register. That list carries no adviser number, so the only possible join is a person's name —
         and a name collision would publish, next to a real named individual, a banning that belongs to somebody
         else. Every disciplinary record shown here is <strong>ASIC's own entry against that adviser's own
-        record</strong> on this register: ${num(m.conduct.actions)} actions against ${num(m.conduct.advisers)} people.</p>
+        record</strong> on this register: ${num(m.conduct.actions)} distinct actions against ${num(m.conduct.advisers)} people.
+        (ASIC repeats those fields on every appointment row belonging to a disciplined adviser, so the raw file
+        contains ${num(m.conduct.actionRows)} such rows for those ${num(m.conduct.actions)} actions — counting rows
+        would overstate regulatory action threefold.)</p>
         <p>It also does not rank, score or rate advisers, and nothing here is advice about whether to use one.</p>
 
         <h4>Known limits</h4>
@@ -157,12 +160,19 @@ function aboutModal(m: Meta): void {
           adviser counts are current — the two vintages differ.</li>
           <li>A person can hold appointments at two licensees at once. Bands in the retreat view count them
           in each, but the total counts them once, so bands do not sum to the total.</li>
+          <li>Everything time-based starts in <strong>2015</strong>, when the register commenced. It carries
+          appointments back to 1969 but not the people who had already left, so any earlier headcount or survival
+          curve measures the register's own coverage rather than the profession.</li>
+          <li>Nine rows in ASIC's file contain a stray tab, which in a tab-delimited export shifts every later
+          column. They are rejected rather than guessed at — one of them would otherwise have published a named
+          adviser's professional memberships as a regulatory restriction.</li>
           <li>ASIC's own data has a few malformed rows — five current advisers have a state abbreviation
           where a postcode should be. They are counted, and named, in the Where view rather than dropped.</li>
         </ul>
 
         <h4>How it is checked</h4>
-        <p>Seven reconciliation gates run on every build and the pipeline refuses to write data if any fails:</p>
+        <p>${m.gates.length} reconciliation gates run on every build, and the pipeline refuses to write data if
+        any of them fails:</p>
         <ul>${m.gates.map((g) => `<li><strong>${esc(g.name)}</strong> — ${esc(g.detail)}</li>`).join('')}</ul>
 
         <h4>Corrections</h4>

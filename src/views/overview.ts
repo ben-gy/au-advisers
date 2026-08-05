@@ -72,8 +72,11 @@ export async function renderOverview({ root, meta }: ViewCtx): Promise<void> {
   const sy = linear([0, maxTotal * 1.05], [pad.t + ih, pad.t]);
 
   const c1 = chartCard(
-    'The profession, 1999 to now',
-    'Advisers on the register at 30 June each year. The peak and the collapse either side of the 2019 professional-standards reforms is the single biggest change in the register\'s history.',
+    `The profession, ${dated[0].year} to now`,
+    'Advisers on the register at 30 June each year. The peak and the collapse either side of the 2019 ' +
+    'professional-standards reforms is the single biggest change the register has recorded. The series starts ' +
+    'in 2015 because that is when the register commenced — it cannot see anyone who had already left, so an ' +
+    'earlier line would chart its own coverage filling up rather than the profession growing.',
   );
   const s1 = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: H, preserveAspectRatio: 'xMidYMid meet' });
   describe(s1, `Line chart of total advisers on the register from ${dated[0].year} to ${dated[dated.length - 1].year}, peaking and then falling by about half.`);
@@ -109,10 +112,12 @@ export async function renderOverview({ root, meta }: ViewCtx): Promise<void> {
   root.appendChild(c1.card);
 
   // ── entries vs exits ──────────────────────────────────
-  const flow = cohortData.flow.filter((f) => f.year >= 2000 && f.year <= meta.asAtYear);
+  const flow = cohortData.flow.filter((f) => f.year <= meta.asAtYear);
   const c2 = chartCard(
     'Who arrived, who left',
-    'New advisers joining the register against advisers leaving it, by year. The register has run net-negative every year since 2019 — the story is as much about who stopped arriving as about who left.',
+    'New advisers joining the register against advisers leaving it, by year. The story is as much about who ' +
+    `stopped arriving as about who left. ${meta.asAtYear} is a part-year — the register is current at ` +
+    `${date(meta.asAt)} — and is drawn hatched for that reason.`,
   );
   const FW = 900;
   const FH = 260;
@@ -125,17 +130,24 @@ export async function renderOverview({ root, meta }: ViewCtx): Promise<void> {
   describe(s2, 'Butterfly chart of advisers entering the register above the axis and leaving below, by year.');
   const colW = fiw / flow.length;
   const mid = fpad.t + half;
+  // The final year is a PART year (the register is current mid-year), so its
+  // bars are drawn faded and flagged in the tooltip — an unmarked short bar at
+  // the end of a time series reads as a collapse that has not happened.
+  const partialYear = meta.asAtYear;
   flow.forEach((f, i) => {
     const x = fpad.l + i * colW;
     const bw = Math.max(1, colW - 2);
+    const partial = f.year === partialYear;
     const eh = fmax > 0 ? (f.entries / fmax) * half : 0;
     const xh = fmax > 0 ? (f.exits / fmax) * half : 0;
-    const rIn = svg('rect', { x: finite(x), y: finite(mid - eh), width: bw, height: finite(eh), fill: '#3f6b8a', rx: 1 });
-    mark(rIn, `${f.year}\n${num(f.entries)} advisers started\n${num(f.exits)} advisers left\nnet ${f.entries - f.exits >= 0 ? '+' : ''}${num(f.entries - f.exits)}`);
-    const rOut = svg('rect', { x: finite(x), y: mid, width: bw, height: finite(xh), fill: '#a8613f', rx: 1 });
-    mark(rOut, `${f.year}\n${num(f.exits)} advisers left\n${num(f.entries)} advisers started\nnet ${f.entries - f.exits >= 0 ? '+' : ''}${num(f.entries - f.exits)}`);
+    const suffix = partial ? `\n\nPART YEAR — data ends ${date(meta.asAt)}, so this bar is not comparable with a full year.` : '';
+    const op = partial ? 0.45 : 1;
+    const rIn = svg('rect', { x: finite(x), y: finite(mid - eh), width: bw, height: finite(eh), fill: '#3f6b8a', rx: 1, 'fill-opacity': op });
+    mark(rIn, `${f.year}${partial ? ' (part year)' : ''}\n${num(f.entries)} advisers started\n${num(f.exits)} advisers left\nnet ${f.entries - f.exits >= 0 ? '+' : ''}${num(f.entries - f.exits)}${suffix}`);
+    const rOut = svg('rect', { x: finite(x), y: mid, width: bw, height: finite(xh), fill: '#a8613f', rx: 1, 'fill-opacity': op });
+    mark(rOut, `${f.year}${partial ? ' (part year)' : ''}\n${num(f.exits)} advisers left\n${num(f.entries)} advisers started\nnet ${f.entries - f.exits >= 0 ? '+' : ''}${num(f.entries - f.exits)}${suffix}`);
     s2.append(rIn, rOut);
-    if (f.year % 5 === 0) {
+    if (f.year % 5 === 0 || partial) {
       const lab = svg('text', { x: finite(x + bw / 2), y: FH - 8, 'text-anchor': 'middle', 'font-size': 11 });
       lab.textContent = String(f.year);
       s2.appendChild(lab);
@@ -151,6 +163,7 @@ export async function renderOverview({ root, meta }: ViewCtx): Promise<void> {
   c2.body.appendChild(legend([
     { color: '#3f6b8a', label: 'Started advising' },
     { color: '#a8613f', label: 'Left the register' },
+    { color: '#8fa8bd', label: `${meta.asAtYear} is a part year`, note: `to ${date(meta.asAt)}` },
   ]));
   root.appendChild(c2.card);
 

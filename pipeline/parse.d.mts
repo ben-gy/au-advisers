@@ -53,7 +53,11 @@ export function dayToYear(day: number | null): number | null;
 export function parseChain(raw: string): ChainLink[];
 export function ownerOfName(name: string): string | null;
 export function ownersForAppointment(chain: ChainLink[], startDay: number | null, dated?: boolean): string[];
-export function buildAppointments(rows: RawRow[]): {
+export function hasFieldCountMismatch(row: RawRow, expectedFields: number): boolean;
+export function distinctActions(appointments: Appointment[]): {
+  advNumber: string; type: string; start: number | null; end: number | null; desc: string;
+}[];
+export function buildAppointments(rows: RawRow[], expectedFields?: number | null): {
   appointments: Appointment[];
   rejected: Record<string, number>;
   rejectedRows: RawRow[];
@@ -103,6 +107,10 @@ export function gateDatingRule(appointments: Appointment[]): Gate & {
 export function gateMovementConservation(
   careers: Map<string, Appointment[]>,
   movements: { edges: { from: string; to: string; count: number }[]; transitions: number; exits: number },
+  appointments?: Appointment[] | null,
+): Gate & { problems: string[] };
+export function gateSeriesEra(
+  series: { year: number; total?: number }[],
 ): Gate & { problems: string[] };
 export function gateGeographyScope(appointments: Appointment[]): Gate & { problems: string[] };
 export function gateCensusAnchor(totalPersons: number, postcodeCount: number): Gate & { problems: string[] };

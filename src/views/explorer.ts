@@ -67,10 +67,15 @@ export async function renderExplorer({ root, meta, params }: ViewCtx): Promise<v
   root.appendChild(pills);
 
   // ── the click-to-filter histogram ─────────────────────
+  // The bars are years since the adviser FIRST GAVE ADVICE (their own reported
+  // year), not the span of their recorded appointments — those differ, and for
+  // a ceased adviser the reported year keeps counting after they left. The
+  // caption says which one it is.
   const histCard = chartCard(
-    'How long careers last',
-    'Every adviser by the number of years between their first and last recorded appointment. Click a bar to ' +
-    'filter the table below to that group.',
+    'How long advisers have been in the industry',
+    'Every adviser by the number of years since they first gave advice, as they reported it to ASIC. For ' +
+    'someone no longer registered this counts from that year to today, not to the day they left — it is a ' +
+    'measure of experience, not of career length. Click a bar to filter the table below.',
   );
   root.appendChild(histCard.card);
 

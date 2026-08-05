@@ -96,7 +96,10 @@ export interface Meta {
   exits: number;
   edges: number;
   conduct: {
+    /** DISTINCT actions, de-duplicated across an adviser's appointment rows. */
     actions: number;
+    /** Raw appointment rows carrying a disciplinary field — always larger. */
+    actionRows: number;
     advisers: number;
     byType: Record<string, number>;
     byYear: Record<string, number>;
@@ -127,7 +130,9 @@ export interface Geography {
   censusTotal: number;
   coverage: {
     mappedPostcodes: number;
+    /** Distinct people, not a sum over postcodes. */
     mappedAdvisers: number;
+    mappedAppointments: number;
     unmappablePostcodes: number;
     unmappableAdvisers: number;
     poBox: { pc: string; n: number }[];
